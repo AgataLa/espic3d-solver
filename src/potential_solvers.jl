@@ -1,205 +1,64 @@
-function compute_potential_multigrid!()
-    L2 = 0.0
-    conv = false
+using LinearAlgebra
+using SparseArrays
 
-    fine_its = 5
-    h2_its = 10
-    h4_its = 20
-
-    Δx2 = 2Δx
-    Δy2 = 2Δy
-    Δz2 = 2Δz
-    Δx4 = 4Δx
-    Δy4 = 4Δy
-    Δz4 = 4Δz
-
-    R1 = zeros(Float64, NX-1, NY-1, NZ-1)
-    EPS1 = zeros(Float64, NX-1, NY-1, NZ-1)
-    R2 = zeros(Float64, ceil((NX-1)/2), ceil((NY-1)/2), ceil((NZ-1)/2))
-    EPS2 = zeros(Float64, ceil((NX-1)/2), ceil((NY-1)/2), ceil((NZ-1)/2))
-    R4 = zeros(Float64, ceil((NX-1)/4), ceil((NY-1)/4), ceil((NZ-1)/4))
-    EPS4 = zeros(Float64, ceil((NX-1)/4), ceil((NY-1)/4), ceil((NZ-1)/4))
-
-    for it = 1:max_it
-        #1 fine mesh iterations
-        @inbounds for m = 1:fine_its
-            @inbounds for k = 1:(NZ-1), j = 1:(NY-1), i = 1:(NX-1)
-                prvi, nxti = periodic_boundary_conditions(i-1, i+1, NX)
-                prvj, nxtj = periodic_boundary_conditions(j-1, j+1, NY)
-                prvk, nxtk = periodic_boundary_conditions(k-1, k+1, NZ) 
-                ϕ_new = ((ϕ[prvi,j,k] + ϕ[nxti,j,k])/(Δx^2) + (ϕ[i,prvj,k] + ϕ[i,nxtj,k])/(Δy^2) + (ϕ[i,j,prvk] + ϕ[i,j,nxtk])/(Δz^2) + ρ[i,j,k]/ε_0) / (2/(Δx^2) + 2/(Δy^2) + 2/(Δz^2))
-
-                ϕ[i,j,k] = ϕ[i,j,k] + ω*(ϕ_new - ϕ[i,j,k])
-            end 
-        end
-
-        #1 fine mesh residuum and conv check
-        sum_L2 = 0
-        @inbounds for k = 1:(NZ-1), j = 1:(NY-1), i = 1:(NX-1)
-            prvi, nxti = periodic_boundary_conditions(i-1, i+1, NX)
-            prvj, nxtj = periodic_boundary_conditions(j-1, j+1, NY)
-            prvk, nxtk = periodic_boundary_conditions(k-1, k+1, NZ)
-            R1[i,j,k] = -ϕ[i,j,k] + (ρ[i,j,k]/ε_0 + (ϕ[prvi,j,k] + ϕ[nxti,j,k])/(Δy^2) + (ϕ[i,prvj,k] + ϕ[i,nxtj,k])/(Δx^2) + (ϕ[i,j,prvk] + ϕ[i,j,nxtk])/(Δz^2)) / (2/(Δx^2) + 2/(Δy^2) + 2/(Δz^2))
-            sum_L2 += R1[i,j,k]^2
-        end
-        L2 = sqrt(sum_L2 / ((NX-1)*(NY-1)*(NZ-1)))
-        if L2 < tolerance
-            conv = true
-            break
-        end
+const max_it    = 10000                         # Gauss-Seidel for ϕ
+const ω         = 1.4                           # SOR
+const tolerance = 1e-8                          # L2 tolerance
 
 
-        # 2h mesh restriction
-        @inbounds for k = 1:2:size(R1)[3], j = 1:2:size(R1)[2], i = 1:2:size(R1)[1]
-            prvi, nxti = pbc_for_residuum(i-1, i+1, size(R1)[3])
-            prvj, nxtj = pbc_for_residuum(j-1, j+1, size(R1)[2])
-            prvk, nxtk = pbc_for_residuum(k-1, k+1, size(R1)[1])
-            R2[ceil(Int,i/2),ceil(Int,j/2),ceil(Int,k/2)] = (6*R1[i,j,k] + R1[prvi,j,k] + R1[nxti,j,k] + R1[i,prvj,k] + R1[i,nxtj,k]+ R1[i,j,prvk] + R1[i,j,nxtk]) / 12.0
-        end 
-
-        # 4h mesh restriction
-        @inbounds for k = 1:2:size(R2)[3], j = 1:2:size(R2)[2], i = 1:2:size(R2)[1]
-            prvi, nxti = pbc_for_residuum(i-1, i+1, size(R2)[1])
-            prvj, nxtj = pbc_for_residuum(j-1, j+1, size(R2)[2])
-            prvk, nxtk = pbc_for_residuum(k-1, k+1, size(R2)[3])
-            R4[ceil(Int,i/2),ceil(Int,j/2),ceil(Int,k/2)] = (6*R2[i,j,k] + R2[prvi,j,k] + R2[nxti,j,k] + R2[i,prvj,k] + R2[i,nxtj,k]+ R2[i,j,prvk] + R2[i,j,nxtk]) / 12.0
-        end 
-
-        #4h mesh iterations
-        @inbounds for m = 1:h4_its
-            @inbounds for k = 1:size(R4)[3], j = 1:size(R4)[2], i = 1:size(R4)[1]
-                prvi, nxti = pbc_for_residuum(i-1, i+1, size(R4)[1])
-                prvj, nxtj = pbc_for_residuum(j-1, j+1, size(R4)[2])
-                prvk, nxtk = pbc_for_residuum(k-1, k+1, size(R4)[3]) 
-
-                new_eps = (R4[i,j,k] + (EPS4[prvi,j,k] + EPS4[nxti,j,k])/(Δx4^2) + (EPS4[i,prvj,k] + EPS4[i,nxtj,k])/(Δy4^2) + (EPS4[i,j,prvk] + EPS4[i,j,nxtk])/(Δz4^2)) / (2/(Δx4^2) + 2/(Δy4^2) + 2/(Δz4^2))
-
-                EPS4[i,j,k] = EPS4[i,j,k] + ω*(new_eps - EPS4[i,j,k])
-            end 
-        end
-
-        # interpolation from 4h to 2h mesh
-        @inbounds for k = 1:size(R2)[3], j = 1:size(R2)[2], i = 1:size(R2)[1]
-            ir4 = ceil(Int,i/2)
-            jr4 = ceil(Int,j/2)
-            kr4 = ceil(Int,k/2)
-            prvi, nxti = pbc_for_residuum(ir4-1, ir4+1, size(R4)[1])
-            prvj, nxtj = pbc_for_residuum(jr4-1, jr4+1, size(R4)[2])
-            prvk, nxtk = pbc_for_residuum(kr4-1, kr4+1, size(R4)[3])
-            
-            if i % 2 == 1 && j % 2 == 1 && k % 2 == 1
-                EPS2[i,j,k] = EPS4[ir4,jr4,kr4]
-            elseif i % 2 == 0 && j % 2 == 1 && k % 2 == 1
-                EPS2[i,j,k] = 0.5*(EPS4[ir4,jr4,kr4] + EPS4[nxti,jr4,kr4])
-            elseif i % 2 == 1 && j % 2 == 0 && k % 2 == 1
-                EPS2[i,j,k] = 0.5*(EPS4[ir4,jr4,kr4] + EPS4[ir4,nxtj,kr4])
-            elseif i % 2 == 1 && j % 2 == 1 && k % 2 == 0
-                EPS2[i,j,k] = 0.5*(EPS4[ir4,jr4,kr4] + EPS4[ir4,jr4,nxtk])
-            elseif i % 2 == 1 && j % 2 == 0 && k % 2 == 0
-                EPS2[i,j,k] = 0.25*(EPS4[ir4,jr4,kr4] + EPS4[ir4,nxtj,kr4] + EPS4[ir4,jr4,nxtk] + EPS4[ir4,nxtj,nxtk])
-            elseif i % 2 == 0 && j % 2 == 1 && k % 2 == 0
-                EPS2[i,j,k] = 0.25*(EPS4[ir4,jr4,kr4] + EPS4[nxti,jr4,kr4] + EPS4[ir4,jr4,nxtk] + EPS4[nxti,jr4,nxtk])
-            elseif i % 2 == 0 && j % 2 == 0 && k % 2 == 1
-                EPS2[i,j,k] = 0.25*(EPS4[ir4,jr4,kr4] + EPS4[ir4,nxtj,kr4] + EPS4[nxti,jr4,kr4] + EPS4[nxti,nxtj,kr4])
-            else
-                EPS2[i,j,k] = 0.125*(EPS4[ir4,jr4,kr4] + EPS4[nxti,jr4,kr4] + EPS4[ir4,nxtj,kr4] + EPS4[ir4,jr4,nxtk] +
-                                    EPS4[nxti,nxtj,kr4] + EPS4[nxti,jr4,nxtk] + EPS4[ir4,nxtj,nxtk] + EPS4[nxti,nxtj,nxtk])
-            end
-            
-        end
-        
-        #2h mesh iterations
-        @inbounds for m = 1:h2_its
-            @inbounds for k = 1:size(R2)[3], j = 1:size(R2)[2], i = 1:size(R2)[1]
-                prvi, nxti = pbc_for_residuum(i-1, i+1, size(R2)[1])
-                prvj, nxtj = pbc_for_residuum(j-1, j+1, size(R2)[2])
-                prvk, nxtk = pbc_for_residuum(k-1, k+1, size(R2)[3]) 
-
-                new_eps = (R2[i,j,k] + (EPS2[prvi,j,k] + EPS2[nxti,j,k])/(Δx2^2) + (EPS2[i,prvj,k] + EPS2[i,nxtj,k])/(Δy2^2) + (EPS2[i,j,prvk] + EPS2[i,j,nxtk])/(Δz2^2)) / (2/(Δx2^2) + 2/(Δy2^2) + 2/(Δz2^2))
-
-                EPS2[i,j,k] = EPS2[i,j,k] + ω*(new_eps - EPS2[i,j,k])
-            end 
-        end
-
-        # interpolation from 2h to fine mesh
-        @inbounds for k = 1:size(R1)[3], j = 1:size(R1)[2], i = 1:size(R1)[1]
-            ir2 = ceil(Int,i/2)
-            jr2 = ceil(Int,j/2)
-            kr2 = ceil(Int,k/2)
-            prvi, nxti = pbc_for_residuum(ir2-1, ir2+1, size(R2)[1])
-            prvj, nxtj = pbc_for_residuum(jr2-1, jr2+1, size(R2)[2])
-            prvk, nxtk = pbc_for_residuum(kr2-1, kr2+1, size(R2)[3])
-            
-            if i % 2 == 1 && j % 2 == 1 && k % 2 == 1
-                EPS1[i,j,k] = EPS2[ir2,jr2,kr2]
-            elseif i % 2 == 0 && j % 2 == 1 && k % 2 == 1
-                EPS1[i,j,k] = 0.5*(EPS2[ir2,jr2,kr2] + EPS2[nxti,jr2,kr2])
-            elseif i % 2 == 1 && j % 2 == 0 && k % 2 == 1
-                EPS1[i,j,k] = 0.5*(EPS2[ir2,jr2,kr2] + EPS2[ir2,nxtj,kr2])
-            elseif i % 2 == 1 && j % 2 == 1 && k % 2 == 0
-                EPS1[i,j,k] = 0.5*(EPS2[ir2,jr2,kr2] + EPS2[ir2,jr2,nxtk])
-            elseif i % 2 == 1 && j % 2 == 0 && k % 2 == 0
-                EPS1[i,j,k] = 0.25*(EPS2[ir2,jr2,kr2] + EPS2[ir2,nxtj,kr2] + EPS2[ir2,jr2,nxtk] + EPS2[ir2,nxtj,nxtk])
-            elseif i % 2 == 0 && j % 2 == 1 && k % 2 == 0
-                EPS1[i,j,k] = 0.25*(EPS2[ir2,jr2,kr2] + EPS2[nxti,jr2,kr2] + EPS2[ir2,jr2,nxtk] + EPS2[nxti,jr2,nxtk])
-            elseif i % 2 == 0 && j % 2 == 0 && k % 2 == 1
-                EPS1[i,j,k] = 0.25*(EPS2[ir2,jr2,kr2] + EPS2[ir2,nxtj,kr2] + EPS2[nxti,jr2,kr2] + EPS2[nxti,nxtj,kr2])
-            else
-                EPS1[i,j,k] = 0.125*(EPS2[ir2,jr2,kr2] + EPS2[nxti,jr2,kr2] + EPS2[ir2,nxtj,kr2] + EPS2[ir2,jr2,nxtk] +
-                                    EPS2[nxti,nxtj,kr2] + EPS2[nxti,jr2,nxtk] + EPS2[ir2,nxtj,nxtk] + EPS2[nxti,nxtj,nxtk])
-            end
-            
-        end
-
-
-        # update fine mesh potential
-        @inbounds for k = 1:(NZ-1), j = 1:(NY-1), i = 1:(NX-1)
-            ϕ[i,j,k] -= EPS1[i,j,k]
-        end 
+function pbc(A, i, j, k)
+    if i == 0
+        i = size(A)[1]
+    elseif i > size(A)[1]
+        i = 1
     end
+    if j == 0
+        j = size(A)[2]
+    elseif j > size(A)[2]
+        j = 1
+    end
+    if k == 0
+        k = size(A)[3]
+    elseif k > size(A)[3]
+        k = 1
+    end
+    return A[i,j,k]
+end
 
-    if conv == false
-        println("GS failed to converge, L2 = ", L2)
+
+# GAUSS-SEIDEL SOR
+function gauss_seidel_sor!(A, B, dx, dy, dz)
+    A_new = 0.0
+    @inbounds for k = 1:size(A)[3], j = 1:size(A)[2], i = 1:size(A)[1]
+        A_new = ((pbc(A,i-1,j,k) + pbc(A,i+1,j,k))/(dx^2) +
+                (pbc(A,i,j-1,k) + pbc(A,i,j+1,k))/(dy^2) +
+                (pbc(A,i,j,k-1) + pbc(A,i,j,k+1))/(dz^2) + 
+                B[i,j,k]) / (2/(dx^2) + 2/(dy^2) + 2/(dz^2))
+
+        A[i,j,k] = A[i,j,k] + ω*(A_new - A[i,j,k])
     end
 end
 
-function pbc_for_residuum(prv, nxt, N)
-    if prv == 0
-        prv = N
-    end
-    if nxt == N
-        nxt = 1
-    end
-    return (prv, nxt)
-end
-
-function compute_potential_NRPCG!()
+function compute_potential!()
     L2 = 0.0
     conv = false
 
     @inbounds for m = 1:max_it
-        ϕ_old .= ϕ
-        @inbounds for k = 1:(NZ-1), j = 1:(NY-1), i = 1:(NX-1)
-            prvi, nxti = periodic_boundary_conditions(i-1, i+1, NX)
-            prvj, nxtj = periodic_boundary_conditions(j-1, j+1, NY)
-            prvk, nxtk = periodic_boundary_conditions(k-1, k+1, NZ) 
-            ϕ[i,j,k] = ((ϕ[prvi,j,k] + ϕ[nxti,j,k])/(Δx^2) + (ϕ[i,prvj,k] + ϕ[i,nxtj,k])/(Δy^2) + (ϕ[i,j,prvk] + ϕ[i,j,nxtk])/(Δz^2) + ρ[i,j,k]/ε_0) / (2/(Δx^2) + 2/(Δy^2) + 2/(Δz^2))
-
-            ϕ[i,j,k] = ϕ_old[i,j,k] + ω*(ϕ[i,j,k] - ϕ_old[i,j,k])
-        end
+        gauss_seidel_sor!(ϕ, ρ, Δx, Δy, Δz)
 
         if m % 25 == 0
-            sum = 0
-            @inbounds for k = 1:(NZ-1), j = 1:(NY-1), i = 1:(NX-1)
-                prvi, nxti = periodic_boundary_conditions(i-1, i+1, NX)
-                prvj, nxtj = periodic_boundary_conditions(j-1, j+1, NY)
-                prvk, nxtk = periodic_boundary_conditions(k-1, k+1, NZ)
-                r = -ϕ[i,j,k]*(2/(Δx^2) + 2/(Δy^2) + 2/(Δz^2)) + ρ[i,j,k]/ε_0 + (ϕ[prvi,j,k] + ϕ[nxti,j,k])/(Δy^2) + (ϕ[i,prvj,k] + ϕ[i,nxtj,k])/(Δx^2) + (ϕ[i,j,prvk] + ϕ[i,j,nxtk])/(Δz^2)
-                sum += r^2
+            sum_L2 = 0
+            @inbounds for k = 1:size(ϕ)[3], j = 1:size(ϕ)[2], i = 1:size(ϕ)[1]
+                r = -ϕ[i,j,k] + (ρ[i,j,k] +
+                (pbc(ϕ,i-1,j,k) + pbc(ϕ,i+1,j,k))/(Δx^2) +
+                (pbc(ϕ,i,j-1,k) + pbc(ϕ,i,j+1,k))/(Δy^2) +
+                (pbc(ϕ,i,j,k-1) + pbc(ϕ,i,j,k+1))/(Δz^2)) / (2/(Δx^2) + 2/(Δy^2) + 2/(Δz^2))
+                sum_L2 += r^2
             end
-            L2 = sqrt(sum / ((NX-1)*(NY-1)*(NZ-1)))
+            L2 = sqrt(sum_L2 / (size(ϕ)[1]*size(ϕ)[2]*size(ϕ)[3]))
             if L2 < tolerance
                 conv = true
+                println("Converged after $(m) iterations, L2 = ", L2)
                 break
             end
         end
@@ -208,4 +67,269 @@ function compute_potential_NRPCG!()
     if conv == false
         println("GS failed to converge, L2 = ", L2)
     end
+end
+
+
+
+# GAUSS-SEIDEL SOR WITH MULTIGRID
+function grid_restriction!(F, C)
+    @inbounds for k = 1:2:size(F)[3], j = 1:2:size(F)[2], i = 1:2:size(F)[1]
+        C[ceil(Int,i/2),ceil(Int,j/2),ceil(Int,k/2)] = (6*pbc(F,i,j,k) +
+                                                        pbc(F,i-1,j,k) + pbc(F,i+1,j,k) +
+                                                        pbc(F,i,j-1,k) + pbc(F,i,j+1,k) +
+                                                        pbc(F,i,j,k-1) + pbc(F,i,j,k+1)) / 12.0
+    end
+end
+
+function grid_interpolation!(C, F)
+    @inbounds for k = 1:size(F)[3], j = 1:size(F)[2], i = 1:size(F)[1]
+        ic = ceil(Int,i/2)
+        jc = ceil(Int,j/2)
+        kc = ceil(Int,k/2)
+        
+        if i % 2 == 1 && j % 2 == 1 && k % 2 == 1
+            F[i,j,k] = C[ic,jc,kc]
+        elseif i % 2 == 0 && j % 2 == 1 && k % 2 == 1
+            F[i,j,k] = 0.5*(C[ic,jc,kc] + pbc(C,ic+1,jc,kc))
+        elseif i % 2 == 1 && j % 2 == 0 && k % 2 == 1
+            F[i,j,k] = 0.5*(C[ic,jc,kc] + pbc(C,ic,jc+1,kc))
+        elseif i % 2 == 1 && j % 2 == 1 && k % 2 == 0
+            F[i,j,k] = 0.5*(C[ic,jc,kc] + pbc(C,ic,jc,kc+1))
+        elseif i % 2 == 1 && j % 2 == 0 && k % 2 == 0
+            F[i,j,k] = 0.25*(C[ic,jc,kc] + pbc(C,ic,jc+1,kc) + pbc(C,ic,jc,kc+1) + pbc(C,ic,jc+1,kc+1))
+        elseif i % 2 == 0 && j % 2 == 1 && k % 2 == 0
+            F[i,j,k] = 0.25*(C[ic,jc,kc] + pbc(C,ic+1,jc,kc) + pbc(C,ic,jc,kc+1) + pbc(C,ic+1,jc,kc+1))
+        elseif i % 2 == 0 && j % 2 == 0 && k % 2 == 1
+            F[i,j,k] = 0.25*(C[ic,jc,kc] + pbc(C,ic+1,jc,kc) + pbc(C,ic,jc+1,kc) + pbc(C,ic+1,jc+1,kc))
+        else
+            F[i,j,k] = 0.125*(C[ic,jc,kc] + pbc(C,ic+1,jc,kc) + pbc(C,ic,jc+1,kc) + pbc(C,ic,jc,kc+1) +
+                            pbc(C,ic+1,jc+1,kc) + pbc(C,ic+1,jc,kc+1) + pbc(C,ic,jc+1,kc+1) + pbc(C,ic+1,jc+1,kc+1))
+        end
+    end
+end
+
+
+function compute_potential_multigrid!()
+    L2 = 0.0
+    conv = false
+
+    fine_its = 3
+    h2_its = 6
+    h4_its = 10
+    h8_its = 20
+
+    for it = 1:max_it
+        #1 fine mesh iterations
+        @inbounds for m = 1:fine_its
+            gauss_seidel_sor!(ϕ, ρ, Δx, Δy, Δz)
+        end
+
+        #1 fine mesh residuum and conv check
+        sum_L2 = 0
+        @inbounds for k = 1:size(ϕ)[3], j = 1:size(ϕ)[2], i = 1:size(ϕ)[1]
+            R1[i,j,k] = -ϕ[i,j,k] + (ρ[i,j,k] +
+            (pbc(ϕ,i-1,j,k) + pbc(ϕ,i+1,j,k))/(Δx^2) +
+            (pbc(ϕ,i,j-1,k) + pbc(ϕ,i,j+1,k))/(Δy^2) +
+            (pbc(ϕ,i,j,k-1) + pbc(ϕ,i,j,k+1))/(Δz^2)) / (2/(Δx^2) + 2/(Δy^2) + 2/(Δz^2))
+            sum_L2 += R1[i,j,k]^2
+        end
+        L2 = sqrt(sum_L2 / (size(ϕ)[1]*size(ϕ)[2]*size(ϕ)[3]))
+        if L2 < tolerance
+            conv = true
+            println("Converged after $(m) iterations, L2 = ", L2)
+            break
+        end
+
+        # 2h mesh restriction
+        grid_restriction!(R1, R2)
+
+        # 4h mesh restriction
+        grid_restriction!(R2, R4)
+
+        # 8h mesh restriction
+        grid_restriction!(R4, R8)
+
+        # 8h mesh iterations
+        @inbounds for m = 1:h8_its
+            gauss_seidel_sor!(EPS8, R8, 8Δx, 8Δy, 8Δz)
+        end
+
+        # interpolation from 8h to 4h mesh
+        grid_interpolation!(EPS8, EPS4)
+
+        # 4h mesh iterations
+        @inbounds for m = 1:h4_its
+            gauss_seidel_sor!(EPS4, R4, 4Δx, 4Δy, 4Δz)
+        end
+
+        # interpolation from 4h to 2h mesh
+        grid_interpolation!(EPS4, EPS2)
+        
+        # 2h mesh iterations
+        @inbounds for m = 1:h2_its
+            gauss_seidel_sor!(EPS2, R2, 4Δx, 4Δy, 4Δz)
+        end
+
+        # interpolation from 2h to fine mesh
+        grid_interpolation!(EPS2, EPS1)
+
+
+        # update fine mesh potential
+        @inbounds for k = 1:size(ϕ)[3], j = 1:size(ϕ)[2], i = 1:size(ϕ)[1]
+            ϕ[i,j,k] -= EPS1[i,j,k]
+        end
+    end
+
+    if conv == false
+        println("GS failed to converge, L2 = ", L2)
+    end
+end
+
+
+# PRECONDITIONED CONJUGATE GRADIENT (PCG)
+
+function build_coefficient_matrix_pbc(ϕ)
+    A = spzeros(length(ϕ), length(ϕ))
+    idx2 = 1/Δx
+    idy2 = 1/Δy
+    idz2 = 1/Δz
+    nx, ny, nz = size(ϕ)
+
+    for k = 1:nz, j = 1:ny, i = 1:nx
+        u = i + (j-1)*nx + (k-1)*nx*ny
+        #println(i, " ", j, " ", k)
+        #println(u)
+        
+        A[u,u] = -2.0*(idx2 + idy2 + idz2)
+        if i == 1                  # i-1
+            A[u,u+nx-1] = idx2
+        else
+            A[u,u-1] = idx2
+        end
+        if i == nx                 # i+1
+            A[u,u-nx+1] = idx2      
+        else
+            A[u,u+1] = idx2
+        end
+        if j == 1                  # j-1
+            A[u,u+(ny-1)*nx] = idy2   
+        else
+            A[u,u-nx] = idy2
+        end
+        if j == ny                  # j+1
+            A[u,u-(ny-1)*nx] = idy2 
+        else
+            A[u,u+nx] = idy2
+        end
+        if k == 1                  # k-1
+            A[u,u+(nz-1)*nx*ny] = idz2   
+        else
+            A[u,u-nx*ny] = idz2
+        end
+        if k == nz                  # k+1
+            A[u,u-(nz-1)*nx*ny] = idz2
+        else
+            A[u,u+nx*ny] = idz2
+        end
+    end
+    return A
+end
+
+
+function build_coefficient_matrix(ϕ)
+    A = spzeros(length(ϕ), length(ϕ))
+    idx2 = 1/Δx
+    idy2 = 1/Δy
+    idz2 = 1/Δz
+    nx, ny, nz = size(ϕ)
+
+    for k in 1:nz, j in 1:ny, i in 1:nx
+        u = i + (j-1)*nx + (k-1)*nx*ny
+
+        A[u, u] = -2.0 * (idx2 + idy2 + idz2)
+        if i > 1
+            A[u, u-1] = idx2
+        end
+        if i < nx
+            A[u, u+1] = idx2
+        end
+        if j > 1
+            A[u, u-nx] = idy2
+        end
+        if j < ny
+            A[u, u+nx] = idy2
+        end
+        if k > 1
+            A[u, u-nx*ny] = idz2
+        end
+        if k < nz
+            A[u, u+nx*ny] = idz2
+        end
+    end
+    return A
+end
+
+
+function build_b_vector(A)
+    nx = (size(A)[1]-1)
+    ny = (size(A)[2]-1)
+    nz = (size(A)[3]-1)
+    b = zeros(Float64, nx*ny*nz)
+
+    for k = 1:nz, j = 1:ny, i = 1:nx
+        u = i + (j-1)*nx + (k-1)*nx*ny
+        b[u] = -A[i,j,k]
+    end
+    return b
+end
+
+function jacobi_preconditioner(A)
+    return Diagonal([1/A[i, i] for i in 1:size(A)[1]])
+end
+
+function apply_solution_to_ϕ!(x)
+    for i in eachindex(x)
+        ϕ[i] = x[i]
+    end
+end
+
+normL2(x) = sqrt(sum(x.^2))
+
+function compute_potential_PCG!()
+    conv = false
+    A = build_coefficient_matrix(ϕ)
+    b = build_b_vector(ρ)
+    M = jacobi_preconditioner(A)
+    x = zeros(Float64, size(b))
+
+    g = A*x - b
+    s = M*g
+    d = -s
+
+    L2 = normL2(g)
+    it = 1
+    while L2 > tolerance && it < max_it
+        z = A*d
+        α = dot(g,s)
+        β = dot(d,z)
+        x = x + (α/β)*d
+        g = g + (α/β)*z
+        s = M*g
+        β = α
+        α = dot(g,s)
+        d = (α/β)*d - s
+        
+        L2 = normL2(g)
+        if L2 < tolerance
+            conv = true
+            break
+        end
+        it += 1
+    end
+
+    if conv == false
+        println("PCG failed to converge, L2 = $(L2)")
+    end
+
+    apply_solution_to_ϕ!(x)
 end
