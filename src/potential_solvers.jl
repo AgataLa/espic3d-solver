@@ -298,7 +298,7 @@ function compute_potential_PCG!()
     # println("COND A: ", cond(Array(APCG)))
     # println("COND A: ", cond(Array(APCG), 1))
     build_b_vector!(bPCG, ρ)
-    M = incomplete_LU_preconditioner(APCG)
+    M = jacobi_preconditioner(APCG)
     x = zeros(Float64, size(bPCG))
 
     g = APCG*x - bPCG
