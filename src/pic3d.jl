@@ -39,6 +39,10 @@ const EPS4  = zeros(Float64, ceil(Int, (NX-1)/4), ceil(Int, (NY-1)/4), ceil(Int,
 const R8    = zeros(Float64, ceil(Int, (NX-1)/8), ceil(Int, (NY-1)/8), ceil(Int, (NZ-1)/8))
 const EPS8  = zeros(Float64, ceil(Int, (NX-1)/8), ceil(Int, (NY-1)/8), ceil(Int, (NZ-1)/8))
 
+#PCG
+const APCG = spzeros(length(ϕ), length(ϕ))
+const bPCG = zeros(Float64, length(ϕ))
+
 const E_ex = [0.0, 0.0, 0.0]
 const B_ex = [0.0, 0.0, 0.0]
 Random.seed!(15)

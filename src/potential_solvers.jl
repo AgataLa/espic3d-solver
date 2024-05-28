@@ -1,5 +1,6 @@
 using LinearAlgebra
 using SparseArrays
+using IncompleteLU
 
 const max_it    = 10000                         # Gauss-Seidel for ϕ
 const ω         = 1.4                           # SOR
@@ -188,12 +189,10 @@ end
 
 # PRECONDITIONED CONJUGATE GRADIENT (PCG)
 
-function build_coefficient_matrix_pbc(ϕ)
-    A = spzeros(length(ϕ), length(ϕ))
+function build_coefficient_matrix_pbc!(A, nx, ny, nz)
     idx2 = 1/Δx
     idy2 = 1/Δy
     idz2 = 1/Δz
-    nx, ny, nz = size(ϕ)
 
     for k = 1:nz, j = 1:ny, i = 1:nx
         u = i + (j-1)*nx + (k-1)*nx*ny
@@ -232,16 +231,13 @@ function build_coefficient_matrix_pbc(ϕ)
             A[u,u+nx*ny] = idz2
         end
     end
-    return A
 end
 
 
-function build_coefficient_matrix(ϕ)
-    A = spzeros(length(ϕ), length(ϕ))
+function build_coefficient_matrix!(A, nx, ny, nz)
     idx2 = 1/Δx
     idy2 = 1/Δy
     idz2 = 1/Δz
-    nx, ny, nz = size(ϕ)
 
     for k in 1:nz, j in 1:ny, i in 1:nx
         u = i + (j-1)*nx + (k-1)*nx*ny
@@ -266,25 +262,26 @@ function build_coefficient_matrix(ϕ)
             A[u, u+nx*ny] = idz2
         end
     end
-    return A
 end
 
 
-function build_b_vector(A)
+function build_b_vector!(b, A)
     nx = (size(A)[1]-1)
     ny = (size(A)[2]-1)
     nz = (size(A)[3]-1)
-    b = zeros(Float64, nx*ny*nz)
 
     for k = 1:nz, j = 1:ny, i = 1:nx
         u = i + (j-1)*nx + (k-1)*nx*ny
         b[u] = -A[i,j,k]
     end
-    return b
 end
 
 function jacobi_preconditioner(A)
     return Diagonal([1/A[i, i] for i in 1:size(A)[1]])
+end
+
+function incomplete_LU_preconditioner(A)
+    return ilu(A, τ = 0.001).L
 end
 
 function apply_solution_to_ϕ!(x)
@@ -297,19 +294,21 @@ normL2(x) = sqrt(sum(x.^2))
 
 function compute_potential_PCG!()
     conv = false
-    A = build_coefficient_matrix(ϕ)
-    b = build_b_vector(ρ)
-    M = jacobi_preconditioner(A)
-    x = zeros(Float64, size(b))
+    build_coefficient_matrix_pbc!(APCG, size(ϕ)[1], size(ϕ)[2], size(ϕ)[3])
+    # println("COND A: ", cond(Array(APCG)))
+    # println("COND A: ", cond(Array(APCG), 1))
+    build_b_vector!(bPCG, ρ)
+    M = incomplete_LU_preconditioner(APCG)
+    x = zeros(Float64, size(bPCG))
 
-    g = A*x - b
+    g = APCG*x - bPCG
     s = M*g
     d = -s
 
     L2 = normL2(g)
     it = 1
     while L2 > tolerance && it < max_it
-        z = A*d
+        z = APCG*d
         α = dot(g,s)
         β = dot(d,z)
         x = x + (α/β)*d
