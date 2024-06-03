@@ -1,6 +1,7 @@
 using LinearAlgebra
 using SparseArrays
 using IncompleteLU
+using FFTW
 
 const max_it    = 10000                         # Gauss-Seidel for ϕ
 const ω         = 1.4                           # SOR
@@ -190,9 +191,9 @@ end
 # PRECONDITIONED CONJUGATE GRADIENT (PCG)
 
 function build_coefficient_matrix_pbc!(A, nx, ny, nz)
-    idx2 = 1/Δx
-    idy2 = 1/Δy
-    idz2 = 1/Δz
+    idx2 = 1/Δx^2
+    idy2 = 1/Δy^2
+    idz2 = 1/Δz^2
 
     for k = 1:nz, j = 1:ny, i = 1:nx
         u = i + (j-1)*nx + (k-1)*nx*ny
@@ -233,11 +234,93 @@ function build_coefficient_matrix_pbc!(A, nx, ny, nz)
     end
 end
 
+function build_coefficient_matrix_4th_order_pbc!(A, nx, ny, nz)
+    idx2 = 1/(12*Δx^2)
+    idy2 = 1/(12*Δy^2)
+    idz2 = 1/(12*Δz^2)
+
+    for k = 1:nz, j = 1:ny, i = 1:nx
+        #println(i, " ", j, " ", k)
+        u = i + (j-1)*nx + (k-1)*nx*ny
+        #println(i, " ", j, " ", k)
+        #println(u)
+        
+        A[u,u] = -30.0*(idx2 + idy2 + idz2)
+
+        if i == 1                  # i-1
+            A[u,u+nx-2] = -idx2
+            A[u,u+nx-1] = 16*idx2
+        elseif i == 2
+            A[u,u+nx-2] = -idx2
+            A[u,u-1] = 16*idx2
+        else
+            A[u,u-2] = -idx2
+            A[u,u-1] = 16*idx2
+        end
+
+        if i == nx                  # i-1
+            A[u,u-nx+2] = -idx2
+            A[u,u-nx+1] = 16*idx2
+        elseif i == (nx-1)
+            A[u,u-nx+2] = -idx2
+            A[u,u+1] = 16*idx2
+        else
+            A[u,u+2] = -idx2
+            A[u,u+1] = 16*idx2
+        end
+
+        if j == 1                  # i-1
+            A[u,u+(ny-2)*nx] = -idy2 
+            A[u,u+(ny-1)*nx] = 16*idy2
+        elseif j == 2
+            A[u,u+(ny-2)*nx] = -idy2 
+            A[u,u-nx] = 16*idy2
+        else
+            A[u,u-2*nx] = -idy2
+            A[u,u-nx] = 16*idy2
+        end
+
+        if j == ny                  # i-1
+            A[u,u-(ny-2)*nx] = -idy2 
+            A[u,u-(ny-1)*nx] = 16*idy2
+        elseif j == (ny-1)
+            A[u,u-(ny-2)*nx] = -idy2 
+            A[u,u+nx] = 16*idy2
+        else
+            A[u,u+2*nx] = -idy2
+            A[u,u+nx] = 16*idy2
+        end
+
+        if k == 1                  # i-1
+            A[u,u+(nz-2)*nx*ny] = -idz2 
+            A[u,u+(nz-1)*nx*ny] = 16*idz2
+        elseif k == 2
+            A[u,u+(nz-2)*nx*ny] = -idz2 
+            A[u,u-nx*ny] = 16*idz2
+        else
+            A[u,u-2*nx*ny] = -idz2
+            A[u,u-nx*ny] = 16*idz2
+        end
+
+        if k == ny                  # i-1
+            A[u,u-(nz-2)*nx*ny] = -idz2 
+            A[u,u-(nz-1)*nx*ny] = 16*idz2
+        elseif k == (ny-1)
+            A[u,u-(nz-2)*nx*ny] = -idz2 
+            A[u,u+nx*ny] = 16*idz2
+        else
+            A[u,u+2*nx*ny] = -idz2
+            A[u,u+nx*ny] = 16*idz2
+        end
+        
+    end
+end
+
 
 function build_coefficient_matrix!(A, nx, ny, nz)
-    idx2 = 1/Δx
-    idy2 = 1/Δy
-    idz2 = 1/Δz
+    idx2 = 1/Δx^2
+    idy2 = 1/Δy^2
+    idz2 = 1/Δz^2
 
     for k in 1:nz, j in 1:ny, i in 1:nx
         u = i + (j-1)*nx + (k-1)*nx*ny
@@ -295,10 +378,10 @@ normL2(x) = sqrt(sum(x.^2))
 function compute_potential_PCG!()
     conv = false
     build_coefficient_matrix_pbc!(APCG, size(ϕ)[1], size(ϕ)[2], size(ϕ)[3])
-    # println("COND A: ", cond(Array(APCG)))
+    #println("COND A: ", cond(Array(APCG)))
     # println("COND A: ", cond(Array(APCG), 1))
     build_b_vector!(bPCG, ρ)
-    M = jacobi_preconditioner(APCG)
+    M = incomplete_LU_preconditioner(APCG)
     x = zeros(Float64, size(bPCG))
 
     g = APCG*x - bPCG
@@ -306,6 +389,7 @@ function compute_potential_PCG!()
     d = -s
 
     L2 = normL2(g)
+    #println(L2)
     it = 1
     while L2 > tolerance && it < max_it
         z = APCG*d

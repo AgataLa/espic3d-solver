@@ -76,7 +76,7 @@ function charge_deposition!(sp::Species)
         ρ[i+1, j,   k+1] += wx     * (1-wy) * wz     * sp.q  
     end
 
-    @inbounds for k = 1:(NZ-1), j = 1:(NY-1)    # wszędzie -1 bo te węzły i tak nie będą wykorzystane przy liczeniu potencjału
+    @inbounds for k = 1:(NZ-1), j = 1:(NY-1)
         ρ[1,j,k] += ρ[NX,j,k]
     end
     @inbounds for j = 1:(NY-1), i = 1:(NX-1)
@@ -85,6 +85,16 @@ function charge_deposition!(sp::Species)
     @inbounds for k = 1:(NZ-1), i = 1:(NX-1)
         ρ[i,1,k] += ρ[i,NY,k]
     end
+
+    # @inbounds for k = 1:(NZ-1), j = 1:(NY-1)
+    #     ρ[NX,j,k] = ρ[1,j,k]
+    # end
+    # @inbounds for j = 1:(NY-1), i = 1:(NX-1)
+    #     ρ[i,j,NZ] = ρ[i,j,1]
+    # end
+    # @inbounds for k = 1:(NZ-1), i = 1:(NX-1)
+    #     ρ[i,NY,k] = ρ[i,1,k]
+    # end
 end
 
 function compute_charge_density!()
@@ -182,6 +192,44 @@ end
 # end
 
 
+function FFT!()
+    # FFT gęstości ładunku
+    ρ_hat = fft(ρ .* ε_0)
+
+    # if (NX) % 2 == 0
+    #     kx = [i <= (NX)/2 - 1 ? i : i - (NX) for i in 0:(NX)-1] .*2π / (NX)
+    #     ky = [i <= (NY)/2 - 1 ? i : i - (NY) for i in 0:(NY)-1] .*2π / (NY)
+    #     kz = [i <= (NZ)/2 - 1 ? i : i - (NZ) for i in 0:(NZ)-1] .*2π / (NZ)
+    # else
+    #     kx = [i <= (NX)/2 ? i : i - (NX) for i in 0:(NX)-1] / (NX)
+    #     ky = [i <= (NY)/2 ? i : i - (NY) for i in 0:(NY)-1] / (NY)
+    #     kz = [i <= (NZ)/2 ? i : i - (NZ) for i in 0:(NZ)-1] / (NZ)
+    # end
+    kx = fftfreq(NX, 1) .*2π
+    ky = fftfreq(NY, 1) .*2π
+    kz = fftfreq(NZ, 1) .*2π
+
+    #println(ρ_hat)
+    ϕ_hat = similar(ρ_hat)
+    for i in 1:size(ϕ_hat, 1), j in 1:size(ϕ_hat, 2), k in 1:size(ϕ_hat, 3)
+        k2 = kx[i]^2 + ky[j]^2 + kz[k]^2
+        #k2 = 4*(sin(π*(i-1)/NX )^2 + sin(π*(j-1)/NY )^2 + sin(π*(k-1)/NZ )^2)
+
+        if k2 != 0
+            ϕ_hat[i, j, k] = ρ_hat[i, j, k] / (ε_0*k2)
+        else
+            ϕ_hat[i, j, k] = 0
+        end
+    end
+    
+    # iFFT potencjału
+    ϕ_fft = ifft(ϕ_hat)
+    
+    # Teraz ϕ zawiera rozwiązanie równania Poissona
+    ϕ .= real.(ϕ_fft[1:(NX-1),1:(NY-1),1:(NZ-1)])
+end
+
+
 function clear!()
     fill!(ρ, 0)
     fill!(ϕ, 0)
@@ -245,6 +293,18 @@ function timestep_PCG!(sp_e::Species, sp_i::Species, time_factor=1.0)
     charge_deposition!(sp_i)
     compute_charge_density!()
     compute_potential_PCG!()
+    compute_electric_field!()
+    boris_pusher!(sp_e, time_factor)
+    boris_pusher!(sp_i, time_factor)
+end
+
+function timestep_FFT!(sp_e::Species, sp_i::Species, time_factor=1.0)
+    clear!()
+    charge_deposition!(sp_e)
+    charge_deposition!(sp_i)
+    compute_charge_density!()
+    FFT!()
+    #println(ϕ[1:3,1:3,1])
     compute_electric_field!()
     boris_pusher!(sp_e, time_factor)
     boris_pusher!(sp_i, time_factor)
