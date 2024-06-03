@@ -194,7 +194,7 @@ end
 
 function FFT!()
     # FFT gęstości ładunku
-    ρ_hat = fft(ρ .* ε_0)
+    ρ_hat = fft(ρ[1:(NX-1),1:(NY-1),1:(NZ-1)] )
 
     # if (NX) % 2 == 0
     #     kx = [i <= (NX)/2 - 1 ? i : i - (NX) for i in 0:(NX)-1] .*2π / (NX)
@@ -205,9 +205,9 @@ function FFT!()
     #     ky = [i <= (NY)/2 ? i : i - (NY) for i in 0:(NY)-1] / (NY)
     #     kz = [i <= (NZ)/2 ? i : i - (NZ) for i in 0:(NZ)-1] / (NZ)
     # end
-    kx = fftfreq(NX, 1) .*2π
-    ky = fftfreq(NY, 1) .*2π
-    kz = fftfreq(NZ, 1) .*2π
+    kx = fftfreq(NX-1, 1) .*2π
+    ky = fftfreq(NY-1, 1) .*2π
+    kz = fftfreq(NZ-1, 1) .*2π
 
     #println(ρ_hat)
     ϕ_hat = similar(ρ_hat)
@@ -216,7 +216,7 @@ function FFT!()
         #k2 = 4*(sin(π*(i-1)/NX )^2 + sin(π*(j-1)/NY )^2 + sin(π*(k-1)/NZ )^2)
 
         if k2 != 0
-            ϕ_hat[i, j, k] = ρ_hat[i, j, k] / (ε_0*k2)
+            ϕ_hat[i, j, k] = ρ_hat[i, j, k] / (k2)
         else
             ϕ_hat[i, j, k] = 0
         end
@@ -226,7 +226,7 @@ function FFT!()
     ϕ_fft = ifft(ϕ_hat)
     
     # Teraz ϕ zawiera rozwiązanie równania Poissona
-    ϕ .= real.(ϕ_fft[1:(NX-1),1:(NY-1),1:(NZ-1)])
+    ϕ .= real.(ϕ_fft)
 end
 
 
