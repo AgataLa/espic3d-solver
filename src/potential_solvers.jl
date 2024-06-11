@@ -138,7 +138,7 @@ function compute_potential_multigrid!()
         L2 = sqrt(sum_L2 / (size(ϕ)[1]*size(ϕ)[2]*size(ϕ)[3]))
         if L2 < tolerance
             conv = true
-            println("Converged after $(m) iterations, L2 = ", L2)
+            println("Converged after $(it) cycles, L2 = ", L2)
             break
         end
 
@@ -169,7 +169,7 @@ function compute_potential_multigrid!()
         
         # 2h mesh iterations
         @inbounds for m = 1:h2_its
-            gauss_seidel_sor!(EPS2, R2, 4Δx, 4Δy, 4Δz)
+            gauss_seidel_sor!(EPS2, R2, 2Δx, 2Δy, 2Δz)
         end
 
         # interpolation from 2h to fine mesh

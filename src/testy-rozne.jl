@@ -62,3 +62,82 @@ d = 4.5e9
 electrons, ions = generate_particles!(NP, d)
 
 @btime PIC3D.timestep_multigrid!(electrons, ions, 1)
+
+
+function poly_2_eval(p)
+    ex = 0
+    for e in p
+        ex *= 2
+        ex+=e
+    end
+    ex
+end
+
+
+function swap_array(nn)
+    
+end
+
+swap_array(8)
+
+poly_2_eval(digits(Bool, 3, base=2, pad=3))
+
+function poly_2_eval(p)
+    ex = 0
+    for e in p
+        ex *= 2
+        ex+=e
+    end
+    ex
+end
+
+function swap_index(index, nbits)
+    return poly_2_eval(digits(Bool, index, base=2, pad=nbits))
+end
+
+function FFT1D(data::Array{Float64}, isign)
+    n=size(data, 1) << 1
+    nbits = ndigits(size(data,1)-1, base=2)
+    for i in 1:div(size(data,1)-1, 2)
+        pair = swap_index(i, nbits)
+        temp = data[i]
+        data[i] = data[pair]
+        data[pair] = temp
+    end
+
+    mmax = 2
+    while n > mmax
+        istep = mmax << 1
+        theta = isign*(2π/mmax)
+        wtemp = sin(0.5*theta)
+        wpr = -2.0 * wtemp^2
+        wpi = sin(theta)
+        wr = 1.0
+        wi = 0.0
+        m = 1
+        while m < mmax
+            i = m
+            while i <= n
+                j=i+mmax
+                tempr=wr*data[j]-wi*data[j+1]
+                tempi=wr*data[j+1]+wi*data[j]
+                data[j]=data[i]-tempr
+                data[j+1]=data[i+1]-tempi
+                data[i] += tempr
+                data[i+1] += tempi
+
+                i += istep
+            end
+            wr=(wtemp=wr)*wpr-wi*wpi+wr
+            wi=wi*wpr+wtemp*wpi+wi
+
+            m += 2
+        end
+        mmax=istep;
+    end
+end
+
+
+x = rand(Float64, 16)
+
+FFT1D(x, 1)
