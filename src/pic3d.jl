@@ -13,9 +13,9 @@ const c²  = c*c
 const q_e = -1.602176634e-19                        # charge of electron [C = A*s]
 const m_e = 9.1093837139e-31                        # mass of electron [kg]
 
-const XL  = 0.05*32                                 # grid length along X (rows), iterator = i
-const YL  = 0.05*32                                 # grid length along Y (columns), iterator = j
-const ZL  = 0.05*32                                 # grid length along Z (pages), iterator = k
+const XL  = 0.05*16                                 # grid length along X (rows), iterator = i
+const YL  = 0.05*16                                # grid length along Y (columns), iterator = j
+const ZL  = 0.05*16                                # grid length along Z (pages), iterator = k
 const Δx  = 0.05
 const Δy  = 0.05
 const Δz  = 0.05
@@ -87,7 +87,7 @@ function compute_K2()
 end
 
 const K2 = compute_K2()
-const ρ̂ = zeros(ComplexF64, NX-1, NY-1, NZ-1)
+const ρ̂ = zeros(Float64, (NX-1)*2, (NY-1), (NZ-1))
 const ϕ̂ = similar(ρ̂)
 
 
@@ -128,16 +128,6 @@ function charge_deposition!(sp::Species)
     @inbounds for k = 1:(NZ-1), i = 1:(NX-1)
         ρ[i,1,k] += ρ[i,NY,k]
     end
-
-    # @inbounds for k = 1:(NZ-1), j = 1:(NY-1)
-    #     ρ[NX,j,k] = ρ[1,j,k]
-    # end
-    # @inbounds for j = 1:(NY-1), i = 1:(NX-1)
-    #     ρ[i,j,NZ] = ρ[i,j,1]
-    # end
-    # @inbounds for k = 1:(NZ-1), i = 1:(NX-1)
-    #     ρ[i,NY,k] = ρ[i,1,k]
-    # end
 end
 
 function compute_charge_density!()
@@ -238,114 +228,115 @@ end
 #     cp[3] = a[1]*b[2] - a[2]*b[1]
 # end
 
-function bit_reversal_permutation!(x, dim)
-    N = size(x, dim)
-    j = 1
-    @inbounds for i in 1:N
-        if j > i
-            if dim == 1
-                temp       = x[i, :, :]
-                x[i, :, :] = x[j, :, :]
-                x[j, :, :] = temp
-            elseif dim == 2
-                temp       = x[:, i, :]
-                x[:, i, :] = x[:, j, :]
-                x[:, j, :] = temp
-            elseif dim == 3
-                temp       = x[:, :, i]
-                x[:, :, i] = x[:, :, j]
-                x[:, :, j] = temp
+function swap(x, i1, i2)
+    temp = x[i1]
+    x[i1] = x[i2]
+    x[i2] = temp
+end
+
+
+function bit_reversal_permutation!(x, ip1, ip2, ip3)
+
+    i2rev = 1
+    @inbounds for i2 in 1:ip1:ip2
+        if i2 < i2rev
+            for i1 = i2:2:(i2+ip1-2)
+                for i3 = i1:ip2:ip3
+                    i3rev = i2rev + i3 - i2
+                    swap(x, i3, i3rev)
+                    swap(x, i3+1, i3rev+1)
+                end
             end
         end
-        m = N >> 1
-        while m >= 1 && j > m
-            j -= m
-            m >>= 1
+        ibit = ip2 >> 1
+        while ibit >= ip1 && i2rev > ibit
+            i2rev -= ibit
+            ibit >>= 1
         end
-        j += m
+        i2rev += ibit
     end
 end
 
-function fft1d_dim!(x, dim, isign)
-    
-    N = size(x, dim)
+function fft1d_dim!(x, ip1, ip2, ip3, isign, N)
+    ifp1 = ip1
+    while ifp1 < ip2
+        ifp2 = ifp1 << 1
+        θ = -2π * isign / (ifp2 / ip1)
+        wtemp = sin(0.5θ)
+        wpr = -2.0 * wtemp^2
+        wpi = sin(θ)
+        wr = 1.0
+        wi = 0.0
 
-    step = 2
-    while step <= N
-        half_step = step ÷ 2
-        w_m = exp(-2im* isign * π / step)
-
-        if dim == 1
-            @inbounds for k in 1:step:N, l in 1:size(x, 2), m in 1:size(x, 3)
-                w = 1.0
-                @inbounds for n in 0:(half_step-1)
-                    u = x[k + n, l, m]
-                    t = w * x[k + n + half_step, l, m]
-                    x[k + n, l, m] = u + t
-                    x[k + n + half_step, l, m] = u - t
-                    w *= w_m
+        for i3 = 1:ip1:ifp1
+            for i1 = i3:2:(i3+ip1-2)
+                for i2 = i1:ifp2:ip3
+                    k1 = i2
+                    k2 = k1 + ifp1
+                    tempr = wr * x[k2]   - wi * x[k2+1]
+                    tempi = wr * x[k2+1] + wi * x[k2]
+                    x[k2] = x[k1] - tempr
+                    x[k2+1] = x[k1+1] - tempi
+                    x[k1] += tempr
+                    x[k1+1] += tempi
                 end
             end
-        elseif dim == 2
-            @inbounds for k in 1:size(x, 1), l in 1:step:N, m in 1:size(x, 3)
-                w = 1.0
-                @inbounds for n in 0:(half_step-1)
-                    u = x[k, l + n, m]
-                    t = w * x[k, l + n + half_step, m]
-                    x[k, l + n, m] = u + t
-                    x[k, l + n + half_step, m] = u - t
-                    w *= w_m
-                end
-            end
-        elseif dim == 3
-            @inbounds for k in 1:size(x, 1), l in 1:size(x, 2), m in 1:step:N
-                w = 1.0
-                @inbounds for n in 0:(half_step-1)
-                    u = x[k, l, m + n]
-                    t = w * x[k, l, m + n + half_step]
-                    x[k, l, m + n] = u + t
-                    x[k, l, m + n + half_step] = u - t
-                    w *= w_m
-                end
-            end
+            wtemp = wr
+            wr = wtemp * wpr - wi    * wpi + wr
+            wi = wi    * wpr + wtemp * wpi + wi
         end
-
-        step *= 2
+        ifp1 = ifp2
     end
 
     if isign == -1
-        x .= x ./ N
+        x ./= N
     end
-    
-    return x
 end
 
-function fft3d(x, isign) #zrobić żeby w tablicy po kolei były przechowywane real i im
-    ρfft .= convert(Array{ComplexF64, 3}, x)
-    for dim in 1:3
-        bit_reversal_permutation!(ρfft, dim)
-        fft1d_dim!(ρfft, dim, isign)
+function fft3d!(x, isign)
+
+    nprev = 1
+    for dim in 3:-1:1
+        N = dim == 1 ? size(x, dim) ÷ 2 : size(x, dim)
+        nrem = (length(x) ÷ 2 ) ÷ (N*nprev)
+        ip1 = nprev << 1
+        ip2 = ip1 * N
+        ip3 = ip2 * nrem
+
+        bit_reversal_permutation!(x, ip1, ip2, ip3)
+        fft1d_dim!(x, ip1, ip2, ip3, isign, N)
+
+        nprev *= N
     end
-    return ρfft
 end
 
 
-const ρfft = zeros(ComplexF64, size(ϕ))
-
+#const ρ_cut = zeros(Float64, NX-1, NY-1, NZ-1)
 
 function compute_potential_FFT!()
-    # FFT gęstości ładunku
-    ρ̂ .= fft3d(ρ[1:(NX-1),1:(NY-1),1:(NZ-1)], 1)
+    ρ_cut = @view ρ[1:(NX-1),1:(NY-1),1:(NZ-1)]
+    for i in 1:length(ρ_cut)
+        ρ̂[i*2-1] = ρ_cut[i]
+        ρ̂[i*2] = 0.0
+    end
 
-    @inbounds for i in 1:size(ϕ̂, 1), j in 1:size(ϕ̂, 2), k in 1:size(ϕ̂, 3)
+    fft3d!(ρ̂, 1.)
+
+    @inbounds for k in 1:size(ϕ̂, 3), j in 1:size(ϕ̂, 2), i in 1:(NX-1)
         if K2[i,j,k] != 0
-            ϕ̂[i, j, k] = ρ̂[i, j, k] / K2[i,j,k]
+            ϕ̂[i*2-1, j, k] = ρ̂[i*2-1, j, k] / K2[i,j,k]
+            ϕ̂[i*2,   j, k] = ρ̂[i*2,   j, k] / K2[i,j,k]
         else
-            ϕ̂[i, j, k] = 0.0 # na pewno 0 ?
+            ϕ̂[i*2-1, j, k] = 0.0
+            ϕ̂[i*2,   j, k] = 0.0
         end
     end
-    
-    ϕ .= real.(fft3d(ϕ̂, -1))
+
+    fft3d!(ϕ̂, -1.)
+
+    for i in 1:length(ϕ)
+        ϕ[i] = ϕ̂[i*2-1]
+    end
 end
 
 
