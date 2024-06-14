@@ -131,10 +131,14 @@ function charge_deposition!(sp::Species)
 end
 
 function compute_charge_density!()
+    ρ̅ = 0
     @inbounds for i in eachindex(ρ)
         ρ[i] /= Δx*Δy*Δz*ε_0
+        ρ̅ += ρ[i]
     end
-    ρ̅ = mean(ρ[1:NX-1, 1:NY-1, 1:NZ-1])
+    
+    ρ̅ /= (NX-1)*(NY-1)*(NZ-1)
+
     @inbounds for i in eachindex(ρ)
         ρ[i] -= ρ̅
     end
@@ -414,7 +418,6 @@ function timestep_FFT!(sp_e::Species, sp_i::Species, time_factor=1.0)
     charge_deposition!(sp_i)
     compute_charge_density!()
     compute_potential_FFT!()
-    #println(ϕ[1:3,1:3,1])
     compute_electric_field!()
     boris_pusher!(sp_e, time_factor)
     boris_pusher!(sp_i, time_factor)

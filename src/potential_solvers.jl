@@ -60,15 +60,15 @@ function compute_potential!()
             L2 = sqrt(sum_L2 / (size(ϕ)[1]*size(ϕ)[2]*size(ϕ)[3]))
             if L2 < tolerance
                 conv = true
-                println("Converged after $(m) iterations, L2 = ", L2)
+                #println("Converged after $(m) iterations, L2 = ", L2)
                 break
             end
         end
     end
 
-    if conv == false
-        println("GS failed to converge, L2 = ", L2)
-    end
+    # if conv == false
+    #     println("GS failed to converge, L2 = ", L2)
+    # end
 end
 
 
