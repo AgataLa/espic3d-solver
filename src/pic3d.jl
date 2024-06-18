@@ -13,7 +13,7 @@ const c²  = c*c
 const q_e = -1.602176634e-19                        # charge of electron [C = A*s]
 const m_e = 9.1093837139e-31                        # mass of electron [kg]
 
-const XL  = 0.05*16                                 # grid length along X (rows), iterator = i
+const XL  = 0.05*32                                # grid length along X (rows), iterator = i
 const YL  = 0.05*16                                # grid length along Y (columns), iterator = j
 const ZL  = 0.05*16                                # grid length along Z (pages), iterator = k
 const Δx  = 0.05
@@ -49,47 +49,10 @@ const B_ex = [0.0, 0.0, 0.0]
 Random.seed!(15)
 
 # FFT
-function compute_K2()
-    K2 = zeros(Float64, (NX-1),(NY-1),(NZ-1))
-
-    n = NX-1
-    if n % 2 == 0
-        kx = [0:n÷2-1; -n÷2:-1] .* 2π ./ XL
-    else
-        kx = [0:(n-1)÷2; -(n-1)÷2:-1] .* 2π ./ XL
-    end
-    n = NY-1
-    if n % 2 == 0
-        ky = [0:n÷2-1; -n÷2:-1] .* 2π ./ YL
-    else
-        ky = [0:(n-1)÷2; -(n-1)÷2:-1] .* 2π ./ YL
-    end
-    n = NZ-1
-    if n % 2 == 0
-        kz = [0:n÷2-1; -n÷2:-1] .* 2π ./ ZL
-    else
-        kz = [0:(n-1)÷2; -(n-1)÷2:-1] .* 2π ./ ZL
-    end
-
-    for k in 1:(NZ-1), j in 1:(NY-1), i in 1:(NX-1)
-        if kx[i] != 0
-            K2[i,j,k] += kx[i]^2*((sin(Δx*kx[i]/2))/(Δx*kx[i]/2))^2
-        end
-        if ky[j] != 0
-            K2[i,j,k] += ky[j]^2*((sin(Δy*ky[j]/2))/(Δy*ky[j]/2))^2
-        end
-        if kz[k] != 0
-            K2[i,j,k] += kz[k]^2*((sin(Δz*kz[k]/2))/(Δz*kz[k]/2))^2
-        end
-    end
-
-    return K2
-end
-
 const K2 = compute_K2()
 const ρ̂ = zeros(Float64, (NX-1)*2, (NY-1), (NZ-1))
+const ρ̂2 = zeros(ComplexF64, (NX-1), (NY-1), (NZ-1))
 const ϕ̂ = similar(ρ̂)
-
 
 function cell_for_particle(x)                   # left upper front node of cell
     i = floor(Int, x[1] / Δx) + 1
@@ -147,8 +110,8 @@ end
 
 function compute_electric_field!()
     @inbounds for k = 1:size(Ex)[3], j = 1:size(Ex)[2], i = 1:size(Ex)[1]
-        Ex[i,j,k] = (pbc(ϕ,i-1,j,k)- pbc(ϕ,i+1,j,k))/(2Δx)
-        Ey[i,j,k] = (pbc(ϕ,i,j-1,k)- pbc(ϕ,i,j+1,k))/(2Δy)
+        Ex[i,j,k] = (pbc(ϕ,i-1,j,k) - pbc(ϕ,i+1,j,k))/(2Δx)
+        Ey[i,j,k] = (pbc(ϕ,i,j-1,k) - pbc(ϕ,i,j+1,k))/(2Δy)
         Ez[i,j,k] = (pbc(ϕ,i,j,k-1) - pbc(ϕ,i,j,k+1))/(2Δz)
     end
 end
@@ -226,130 +189,17 @@ function boris_pusher!(sp::Species, factor)
     end
 end
 
-# function cross_product!(a, b)
-#     cp[1] = a[2]*b[3] - a[3]*b[2]
-#     cp[2] = a[3]*b[1] - a[1]*b[3]
-#     cp[3] = a[1]*b[2] - a[2]*b[1]
-# end
-
-function swap(x, i1, i2)
-    temp = x[i1]
-    x[i1] = x[i2]
-    x[i2] = temp
-end
-
-
-function bit_reversal_permutation!(x, ip1, ip2, ip3)
-
-    i2rev = 1
-    @inbounds for i2 in 1:ip1:ip2
-        if i2 < i2rev
-            for i1 = i2:2:(i2+ip1-2)
-                for i3 = i1:ip2:ip3
-                    i3rev = i2rev + i3 - i2
-                    swap(x, i3, i3rev)
-                    swap(x, i3+1, i3rev+1)
-                end
-            end
-        end
-        ibit = ip2 >> 1
-        while ibit >= ip1 && i2rev > ibit
-            i2rev -= ibit
-            ibit >>= 1
-        end
-        i2rev += ibit
-    end
-end
-
-function fft1d_dim!(x, ip1, ip2, ip3, isign, N)
-    ifp1 = ip1
-    while ifp1 < ip2
-        ifp2 = ifp1 << 1
-        θ = -2π * isign / (ifp2 / ip1)
-        wtemp = sin(0.5θ)
-        wpr = -2.0 * wtemp^2
-        wpi = sin(θ)
-        wr = 1.0
-        wi = 0.0
-
-        for i3 = 1:ip1:ifp1
-            for i1 = i3:2:(i3+ip1-2)
-                for i2 = i1:ifp2:ip3
-                    k1 = i2
-                    k2 = k1 + ifp1
-                    tempr = wr * x[k2]   - wi * x[k2+1]
-                    tempi = wr * x[k2+1] + wi * x[k2]
-                    x[k2] = x[k1] - tempr
-                    x[k2+1] = x[k1+1] - tempi
-                    x[k1] += tempr
-                    x[k1+1] += tempi
-                end
-            end
-            wtemp = wr
-            wr = wtemp * wpr - wi    * wpi + wr
-            wi = wi    * wpr + wtemp * wpi + wi
-        end
-        ifp1 = ifp2
-    end
-
-    if isign == -1
-        x ./= N
-    end
-end
-
-function fft3d!(x, isign)
-
-    nprev = 1
-    for dim in 3:-1:1
-        N = dim == 1 ? size(x, dim) ÷ 2 : size(x, dim)
-        nrem = (length(x) ÷ 2 ) ÷ (N*nprev)
-        ip1 = nprev << 1
-        ip2 = ip1 * N
-        ip3 = ip2 * nrem
-
-        bit_reversal_permutation!(x, ip1, ip2, ip3)
-        fft1d_dim!(x, ip1, ip2, ip3, isign, N)
-
-        nprev *= N
-    end
-end
-
-
-#const ρ_cut = zeros(Float64, NX-1, NY-1, NZ-1)
-
-function compute_potential_FFT!()
-    ρ_cut = @view ρ[1:(NX-1),1:(NY-1),1:(NZ-1)]
-    for i in 1:length(ρ_cut)
-        ρ̂[i*2-1] = ρ_cut[i]
-        ρ̂[i*2] = 0.0
-    end
-
-    fft3d!(ρ̂, 1.)
-
-    @inbounds for k in 1:size(ϕ̂, 3), j in 1:size(ϕ̂, 2), i in 1:(NX-1)
-        if K2[i,j,k] != 0
-            ϕ̂[i*2-1, j, k] = ρ̂[i*2-1, j, k] / K2[i,j,k]
-            ϕ̂[i*2,   j, k] = ρ̂[i*2,   j, k] / K2[i,j,k]
-        else
-            ϕ̂[i*2-1, j, k] = 0.0
-            ϕ̂[i*2,   j, k] = 0.0
-        end
-    end
-
-    fft3d!(ϕ̂, -1.)
-
-    for i in 1:length(ϕ)
-        ϕ[i] = ϕ̂[i*2-1]
-    end
-end
-
-
-function clear!()
+function init!()
     fill!(ρ, 0)
     fill!(ϕ, 0)
     fill!(Ex, 0)
     fill!(Ey, 0)
     fill!(Ez, 0)
+end
+
+function clear!()
+    fill!(ρ, 0)
+    fill!(ϕ, 0)
 end
 
 function timestep!(sp::Species, time_factor)
@@ -411,6 +261,17 @@ function timestep_PCG!(sp_e::Species, sp_i::Species, time_factor=1.0)
     boris_pusher!(sp_e, time_factor)
     boris_pusher!(sp_i, time_factor)
 end
+
+
+function timestep_FFT!(sp::Species, time_factor=1.0)
+    clear!()
+    charge_deposition!(sp)
+    compute_charge_density!()
+    compute_potential_FFT!()
+    compute_electric_field!()
+    boris_pusher!(sp, time_factor)
+end
+
 
 function timestep_FFT!(sp_e::Species, sp_i::Species, time_factor=1.0)
     clear!()
