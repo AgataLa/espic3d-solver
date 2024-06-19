@@ -115,10 +115,10 @@ function compute_potential_multigrid!()
     L2 = 0.0
     conv = false
 
-    fine_its = 5
-    h2_its = 8
-    h4_its = 20
-    h8_its = 50
+    fine_its = 3
+    h2_its = 5
+    h4_its = 10
+    h8_its = 30
 
     for it = 1:max_it
         #1 fine mesh iterations
@@ -148,16 +148,18 @@ function compute_potential_multigrid!()
         # 4h mesh restriction
         grid_restriction!(R2, R4)
 
-        # 8h mesh restriction
-        grid_restriction!(R4, R8)
+        if @isdefined R8
+            # 8h mesh restriction
+            grid_restriction!(R4, R8)
 
-        # 8h mesh iterations
-        @inbounds for m = 1:h8_its
-            gauss_seidel_sor!(EPS8, R8, 8Δx, 8Δy, 8Δz)
+            # 8h mesh iterations
+            @inbounds for m = 1:h8_its
+                gauss_seidel_sor!(EPS8, R8, 8Δx, 8Δy, 8Δz)
+            end
+
+            # interpolation from 8h to 4h mesh
+            grid_interpolation!(EPS8, EPS4)
         end
-
-        # interpolation from 8h to 4h mesh
-        grid_interpolation!(EPS8, EPS4)
 
         # 4h mesh iterations
         @inbounds for m = 1:h4_its
@@ -175,15 +177,19 @@ function compute_potential_multigrid!()
         # interpolation from 2h to fine mesh
         grid_interpolation!(EPS2, EPS1)
 
+        # fine mesh iterations
+        @inbounds for m = 1:fine_its
+            gauss_seidel_sor!(EPS1, R1, Δx, Δy, Δz)
+        end
 
         # update fine mesh potential
         @inbounds for k = 1:size(ϕ)[3], j = 1:size(ϕ)[2], i = 1:size(ϕ)[1]
-            ϕ[i,j,k] -= EPS1[i,j,k]
+            ϕ[i,j,k] += EPS1[i,j,k]
         end
     end
 
     if conv == false
-        println("GS failed to converge, L2 = ", L2)
+        println("GS multigrid failed to converge, L2 = ", L2)
     end
 end
 
@@ -441,7 +447,7 @@ function compute_K2()
         kz = [0:(n-1)÷2; -(n-1)÷2:-1] .* 2π ./ ZL
     end
 
-    for k in 1:(NZ-1), j in 1:(NY-1), i in 1:(NX-1)
+    @inbounds for k in 1:(NZ-1), j in 1:(NY-1), i in 1:(NX-1)
         if kx[i] != 0
             K2[i,j,k] += kx[i]^2*((sin(Δx*kx[i]/2))/(Δx*kx[i]/2))^2
         end
@@ -548,7 +554,6 @@ function compute_potential_FFT!()
     end
 
     fft3d!(ρ̂, 1.)
-    #ρ̂2 .= fft(ρ[1:(NX-1),1:(NY-1),1:(NZ-1)])
 
     @inbounds for k in 1:size(ϕ̂, 3), j in 1:size(ϕ̂, 2), i in 1:size(ϕ̂, 1) ÷ 2
         if K2[i,j,k] != 0

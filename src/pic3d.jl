@@ -5,7 +5,6 @@ using .Particles
 using StaticArrays
 using LinearAlgebra
 using Random
-using Statistics
 
 const ε_0 = 8.854187818814e-12                      # vacuum permittivity [F/m]
 const c   = 299_792_458.0                           # speed of light [m/s]
@@ -13,9 +12,9 @@ const c²  = c*c
 const q_e = -1.602176634e-19                        # charge of electron [C = A*s]
 const m_e = 9.1093837139e-31                        # mass of electron [kg]
 
-const XL  = 0.05*32                                # grid length along X (rows), iterator = i
-const YL  = 0.05*16                                # grid length along Y (columns), iterator = j
-const ZL  = 0.05*16                                # grid length along Z (pages), iterator = k
+const XL  = 0.05*16                                 # grid length along X (rows), iterator = i
+const YL  = 0.05*16                                 # grid length along Y (columns), iterator = j
+const ZL  = 0.05*16                                 # grid length along Z (pages), iterator = k
 const Δx  = 0.05
 const Δy  = 0.05
 const Δz  = 0.05
@@ -37,8 +36,10 @@ const R2    = zeros(Float64, ceil(Int, (NX-1)/2), ceil(Int, (NY-1)/2), ceil(Int,
 const EPS2  = zeros(Float64, ceil(Int, (NX-1)/2), ceil(Int, (NY-1)/2), ceil(Int, (NZ-1)/2))
 const R4    = zeros(Float64, ceil(Int, (NX-1)/4), ceil(Int, (NY-1)/4), ceil(Int, (NZ-1)/4))
 const EPS4  = zeros(Float64, ceil(Int, (NX-1)/4), ceil(Int, (NY-1)/4), ceil(Int, (NZ-1)/4))
-const R8    = zeros(Float64, ceil(Int, (NX-1)/8), ceil(Int, (NY-1)/8), ceil(Int, (NZ-1)/8))
-const EPS8  = zeros(Float64, ceil(Int, (NX-1)/8), ceil(Int, (NY-1)/8), ceil(Int, (NZ-1)/8))
+if NX - 1 >= 16 && NY - 1 >= 16 && NZ - 1 >= 16
+    const R8    = zeros(Float64, ceil(Int, (NX-1)/8), ceil(Int, (NY-1)/8), ceil(Int, (NZ-1)/8))
+    const EPS8  = zeros(Float64, ceil(Int, (NX-1)/8), ceil(Int, (NY-1)/8), ceil(Int, (NZ-1)/8))
+end
 
 #PCG
 const APCG = spzeros(length(ϕ), length(ϕ))
@@ -51,10 +52,9 @@ Random.seed!(15)
 # FFT
 const K2 = compute_K2()
 const ρ̂ = zeros(Float64, (NX-1)*2, (NY-1), (NZ-1))
-const ρ̂2 = zeros(ComplexF64, (NX-1), (NY-1), (NZ-1))
 const ϕ̂ = similar(ρ̂)
 
-function cell_for_particle(x)                   # left upper front node of cell
+function cell_for_particle(x)                       # left upper front node of cell
     i = floor(Int, x[1] / Δx) + 1
     j = floor(Int, x[2] / Δy) + 1
     k = floor(Int, x[3] / Δz) + 1
@@ -93,7 +93,7 @@ function charge_deposition!(sp::Species)
     end
 end
 
-function compute_charge_density!()
+function compute_charge_density!(ρ)
     ρ̅ = 0
     @inbounds for i in eachindex(ρ)
         ρ[i] /= Δx*Δy*Δz*ε_0
@@ -166,9 +166,9 @@ const e = @MVector zeros(3)
 const t = @MVector zeros(3)
 const s = @MVector zeros(3)
 
-function boris_pusher!(sp::Species, factor)
-    for p in eachindex(sp.x)
-        Q = (sp.q*Δt*factor)/(sp.m*2)
+function boris_pusher!(sp::Species)
+    @inbounds for p in eachindex(sp.x)
+        Q = (sp.q*Δt) / (sp.m*2)
         interpolate_E_to_particle!(sp.x[p], e)
         @. u⁻ = sp.v[p] + Q*e
 
@@ -183,7 +183,7 @@ function boris_pusher!(sp::Species, factor)
         
         @. sp.v[p] = u⁺ + e * Q
 
-        @. sp.x[p] += sp.v[p]*Δt*factor
+        @. sp.x[p] += sp.v[p]*Δt
 
         periodic_boundary_for_particle!(sp.x[p])
     end
@@ -202,85 +202,56 @@ function clear!()
     fill!(ϕ, 0)
 end
 
-function timestep!(sp::Species, time_factor)
+function timestep!(sps::Species...)
     clear!()
-    charge_deposition!(sp)
-    compute_charge_density!()
+    for s in sps
+        charge_deposition!(s)
+    end
+    compute_charge_density!(ρ)
     compute_potential!()
     compute_electric_field!()
-    boris_pusher!(sp, time_factor)
+    for s in sps
+        boris_pusher!(s)
+    end
 end
 
-function timestep!(sp_e::Species, sp_i::Species, time_factor=1.0)
+function timestep_multigrid!(sps::Species...)
     clear!()
-    charge_deposition!(sp_e)
-    charge_deposition!(sp_i)
-    compute_charge_density!()
-    compute_potential!()
-    compute_electric_field!()
-    boris_pusher!(sp_e, time_factor)
-    boris_pusher!(sp_i, time_factor)
-end
-
-function timestep_multigrid!(sp::Species, time_factor=1.0)
-    clear!()
-    charge_deposition!(sp)
-    compute_charge_density!()
+    for s in sps
+        charge_deposition!(s)
+    end
+    compute_charge_density!(ρ)
     compute_potential_multigrid!()
     compute_electric_field!()
-    boris_pusher!(sp, time_factor)
+    for s in sps
+        boris_pusher!(s)
+    end
 end
 
-function timestep_multigrid!(sp_e::Species, sp_i::Species, time_factor=1.0)
+function timestep_PCG!(sps::Species...)
     clear!()
-    charge_deposition!(sp_e)
-    charge_deposition!(sp_i)
-    compute_charge_density!()
-    compute_potential_multigrid!()
-    compute_electric_field!()
-    boris_pusher!(sp_e, time_factor)
-    boris_pusher!(sp_i, time_factor)
-end
-
-function timestep_PCG!(sp::Species, time_factor=1.0)
-    clear!()
-    charge_deposition!(sp)
-    compute_charge_density!()
+    for s in sps
+        charge_deposition!(s)
+    end
+    compute_charge_density!(ρ)
     compute_potential_PCG!()
     compute_electric_field!()
-    boris_pusher!(sp, time_factor)
-end
-
-function timestep_PCG!(sp_e::Species, sp_i::Species, time_factor=1.0)
-    clear!()
-    charge_deposition!(sp_e)
-    charge_deposition!(sp_i)
-    compute_charge_density!()
-    compute_potential_PCG!()
-    compute_electric_field!()
-    boris_pusher!(sp_e, time_factor)
-    boris_pusher!(sp_i, time_factor)
+    for s in sps
+        boris_pusher!(s)
+    end
 end
 
 
-function timestep_FFT!(sp::Species, time_factor=1.0)
+function timestep_FFT!(sps::Species...)
     clear!()
-    charge_deposition!(sp)
-    compute_charge_density!()
+    for s in sps
+        charge_deposition!(s)
+    end
+    compute_charge_density!(ρ)
     compute_potential_FFT!()
     compute_electric_field!()
-    boris_pusher!(sp, time_factor)
-end
-
-
-function timestep_FFT!(sp_e::Species, sp_i::Species, time_factor=1.0)
-    clear!()
-    charge_deposition!(sp_e)
-    charge_deposition!(sp_i)
-    compute_charge_density!()
-    compute_potential_FFT!()
-    compute_electric_field!()
-    boris_pusher!(sp_e, time_factor)
-    boris_pusher!(sp_i, time_factor)
+    for s in sps
+        boris_pusher!(s)
+    end
 end
 end
