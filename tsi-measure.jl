@@ -1,9 +1,8 @@
 include("src/pic3d.jl")
 using .PIC3D
+using PyCall
 using PyPlot
 using LinearAlgebra
-using PyCall
-
 
 function generate_particles!(NP, d)
     num = d / (2*NP / (PIC3D.XL*PIC3D.YL*PIC3D.ZL))
