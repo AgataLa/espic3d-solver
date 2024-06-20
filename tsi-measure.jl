@@ -73,9 +73,9 @@ for i = 1:timesteps
         ax = plt.gca()
     ax.set_ylim([-1e6,1e6])
         plt.scatter([electrons.x[i][1] for i in eachindex(electrons.x) if i % 2 == 0],
-                    [electrons.v[i][1] for i in eachindex(electrons.v) if i % 2 == 0], color="red", label="c = 1", s=2)
+                    [electrons.v[i][1] for i in eachindex(electrons.v) if i % 2 == 0], label="c = 1", s=2)
         plt.scatter([electrons.x[i][1] for i in eachindex(electrons.x) if i % 2 == 1],
-                    [electrons.v[i][1] for i in eachindex(electrons.v) if i % 2 == 1], color="blue", label="c = 1", s=2)
+                    [electrons.v[i][1] for i in eachindex(electrons.v) if i % 2 == 1], label="c = 1", s=2)
         plt.xlabel("x [m]")
         plt.ylabel("vₓ [m/s]")
         plt.tight_layout()
