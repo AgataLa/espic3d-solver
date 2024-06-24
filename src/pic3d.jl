@@ -12,12 +12,12 @@ const c²  = c*c
 const q_e = -1.602176634e-19                        # charge of electron [C = A*s]
 const m_e = 9.1093837139e-31                        # mass of electron [kg]
 
-const XL  = 0.05*16                                 # grid length along X (rows), iterator = i
-const YL  = 0.05*16                                 # grid length along Y (columns), iterator = j
-const ZL  = 0.05*16                                 # grid length along Z (pages), iterator = k
 const Δx  = 0.05
 const Δy  = 0.05
 const Δz  = 0.05
+const XL  = Δx*16                                 # grid length along X (rows), iterator = i
+const YL  = Δy*16                                 # grid length along Y (columns), iterator = j
+const ZL  = Δz*16                                 # grid length along Z (pages), iterator = k
 const Δt  = 1.0e-9                                  # 1 ns
 const NX  = round(Int, XL/Δx) + 1                   # number of nodes along X
 const NY  = round(Int, YL/Δy) + 1
@@ -166,9 +166,9 @@ const e = @MVector zeros(3)
 const t = @MVector zeros(3)
 const s = @MVector zeros(3)
 
-function boris_pusher!(sp::Species)
+function boris_pusher!(sp::Species, factor)
     @inbounds for p in eachindex(sp.x)
-        Q = (sp.q*Δt) / (sp.m*2)
+        Q = (sp.q*Δt*factor) / (sp.m*2)
         interpolate_E_to_particle!(sp.x[p], e)
         @. u⁻ = sp.v[p] + Q*e
 
@@ -183,7 +183,7 @@ function boris_pusher!(sp::Species)
         
         @. sp.v[p] = u⁺ + e * Q
 
-        @. sp.x[p] += sp.v[p]*Δt
+        @. sp.x[p] += sp.v[p]*Δt*factor
 
         periodic_boundary_for_particle!(sp.x[p])
     end
@@ -202,7 +202,7 @@ function clear!()
     fill!(ϕ, 0)
 end
 
-function timestep!(sps::Species...)
+function timestep!(factor, sps::Species...)
     clear!()
     for s in sps
         charge_deposition!(s)
@@ -211,11 +211,11 @@ function timestep!(sps::Species...)
     compute_potential!()
     compute_electric_field!()
     for s in sps
-        boris_pusher!(s)
+        boris_pusher!(s, factor)
     end
 end
 
-function timestep_multigrid!(sps::Species...)
+function timestep_multigrid!(factor, sps::Species...)
     clear!()
     for s in sps
         charge_deposition!(s)
@@ -224,11 +224,11 @@ function timestep_multigrid!(sps::Species...)
     compute_potential_multigrid!()
     compute_electric_field!()
     for s in sps
-        boris_pusher!(s)
+        boris_pusher!(s, factor)
     end
 end
 
-function timestep_PCG!(sps::Species...)
+function timestep_PCG!(factor, sps::Species...)
     clear!()
     for s in sps
         charge_deposition!(s)
@@ -237,12 +237,12 @@ function timestep_PCG!(sps::Species...)
     compute_potential_PCG!()
     compute_electric_field!()
     for s in sps
-        boris_pusher!(s)
+        boris_pusher!(s, factor)
     end
 end
 
 
-function timestep_FFT!(sps::Species...)
+function timestep_FFT!(factor, sps::Species...)
     clear!()
     for s in sps
         charge_deposition!(s)
@@ -251,7 +251,7 @@ function timestep_FFT!(sps::Species...)
     compute_potential_FFT!()
     compute_electric_field!()
     for s in sps
-        boris_pusher!(s)
+        boris_pusher!(s, factor)
     end
 end
 end

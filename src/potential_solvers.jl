@@ -4,9 +4,9 @@ using IncompleteLU
 using FFTW
 
 const max_it    = 10000                         # Gauss-Seidel for ϕ
+const max_it_mul    = 100                         # Gauss-Seidel for ϕ
 const ω         = 1.4                           # SOR
 const tolerance = 1e-8                          # L2 tolerance
-
 
 function pbc(A, i, j, k)
     if i == 0
@@ -43,6 +43,7 @@ end
 
 function compute_potential!()
     L2 = 0.0
+    last_L2 = 0.0
     conv = false
 
     @inbounds for m = 1:max_it
@@ -58,11 +59,12 @@ function compute_potential!()
                 sum_L2 += r^2
             end
             L2 = sqrt(sum_L2 / (size(ϕ)[1]*size(ϕ)[2]*size(ϕ)[3]))
-            if L2 < tolerance
+            if L2 < tolerance || abs(last_L2 - L2) < tolerance
                 conv = true
                 #println("Converged after $(m) iterations, L2 = ", L2)
                 break
             end
+            last_L2 = L2
         end
     end
 
@@ -113,14 +115,15 @@ end
 
 function compute_potential_multigrid!()
     L2 = 0.0
+    last_L2 = 0.0
     conv = false
 
     fine_its = 3
     h2_its = 5
     h4_its = 10
-    h8_its = 30
+    h8_its = 5
 
-    for it = 1:max_it
+    for it = 1:max_it_mul
         #1 fine mesh iterations
         @inbounds for m = 1:fine_its
             gauss_seidel_sor!(ϕ, ρ, Δx, Δy, Δz)
@@ -136,11 +139,12 @@ function compute_potential_multigrid!()
             sum_L2 += R1[i,j,k]^2
         end
         L2 = sqrt(sum_L2 / (size(ϕ)[1]*size(ϕ)[2]*size(ϕ)[3]))
-        if L2 < tolerance
+        if L2 < tolerance || abs(last_L2 - L2) < tolerance
             conv = true
-            println("Converged after $(it) cycles, L2 = ", L2)
+            #println("Converged after $(it) cycles, L2 = ", L2)
             break
         end
+        last_L2 = L2
 
         # 2h mesh restriction
         grid_restriction!(R1, R2)
@@ -184,13 +188,13 @@ function compute_potential_multigrid!()
 
         # update fine mesh potential
         @inbounds for k = 1:size(ϕ)[3], j = 1:size(ϕ)[2], i = 1:size(ϕ)[1]
-            ϕ[i,j,k] += EPS1[i,j,k]
+            ϕ[i,j,k] -= EPS1[i,j,k]
         end
     end
 
-    if conv == false
-        println("GS multigrid failed to converge, L2 = ", L2)
-    end
+    # if conv == false
+    #     println("GS multigrid failed to converge, L2 = ", L2)
+    # end
 end
 
 
